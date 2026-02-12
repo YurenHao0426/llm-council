@@ -79,6 +79,27 @@ npm run dev
 
 Then open http://localhost:5173 in your browser.
 
+## Deployment (systemd + HTTPS)
+
+The app can be deployed with nginx reverse proxy, Let's Encrypt HTTPS, and systemd services for persistent background running.
+
+### Service Management
+
+```bash
+# Restart services
+sudo systemctl restart llm-council-backend
+sudo systemctl restart llm-council-frontend
+
+# View logs
+sudo journalctl -u llm-council-backend -f
+sudo journalctl -u llm-council-frontend -f
+
+# Check status
+sudo systemctl status llm-council-backend llm-council-frontend
+```
+
+Service files are at `/etc/systemd/system/llm-council-{backend,frontend}.service`. Nginx config is at `/etc/nginx/sites-available/llm-council.blackhao.com`. Both services auto-start on boot and auto-restart on crash.
+
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API

@@ -31,7 +31,7 @@ def _extract_conversation_history(conversation: Dict[str, Any]) -> List[Dict[str
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "https://llm-council.blackhao.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
