@@ -14,6 +14,20 @@ from .council import run_full_council, generate_conversation_title, stage1_colle
 
 app = FastAPI(title="LLM Council API")
 
+
+def _extract_conversation_history(conversation: Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Extract conversation history as a flat messages list for multi-turn context.
+    User messages use their content; assistant messages use the Stage 3 (chairman) response.
+    """
+    history = []
+    for msg in conversation["messages"]:
+        if msg["role"] == "user":
+            history.append({"role": "user", "content": msg["content"]})
+        elif msg["role"] == "assistant" and msg.get("stage3"):
+            history.append({"role": "assistant", "content": msg["stage3"].get("response", "")})
+    return history
+
 # Enable CORS for local development
 app.add_middleware(
     CORSMiddleware,
@@ -93,20 +107,21 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
-    # Add user message
-    storage.add_user_message(conversation_id, request.content)
-
     # If this is the first message, generate a title
     if is_first_message:
         title = await generate_conversation_title(request.content)
         storage.update_conversation_title(conversation_id, title)
 
+    # Build conversation history for multi-turn context
+    conversation_history = _extract_conversation_history(conversation)
+
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        request.content, conversation_history
     )
 
-    # Add assistant message with all stages
+    # Save user + assistant messages together only after full completion
+    storage.add_user_message(conversation_id, request.content)
     storage.add_assistant_message(
         conversation_id,
         stage1_results,
@@ -137,11 +152,11 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Build conversation history for multi-turn context
+    conversation_history = _extract_conversation_history(conversation)
+
     async def event_generator():
         try:
-            # Add user message
-            storage.add_user_message(conversation_id, request.content)
-
             # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
@@ -149,18 +164,18 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(request.content, conversation_history)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, conversation_history)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, conversation_history)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started
@@ -169,7 +184,8 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 storage.update_conversation_title(conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
-            # Save complete assistant message
+            # Save user + assistant messages together only after full completion
+            storage.add_user_message(conversation_id, request.content)
             storage.add_assistant_message(
                 conversation_id,
                 stage1_results,

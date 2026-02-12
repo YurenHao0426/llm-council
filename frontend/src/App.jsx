@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -9,6 +9,8 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingInput, setPendingInput] = useState(null);
+  const abortControllerRef = useRef(null);
 
   // Load conversations on mount
   useEffect(() => {
@@ -57,9 +59,36 @@ function App() {
     setCurrentConversationId(id);
   };
 
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+
+      // Recover the last user message into the input box and remove the incomplete pair
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        // Find the last user message to recover its content
+        let recoveredContent = '';
+        // Remove trailing assistant message (incomplete)
+        if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+          messages.pop();
+        }
+        // Remove the user message and recover its text
+        if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+          const userMsg = messages.pop();
+          recoveredContent = userMsg.content;
+        }
+        setPendingInput(recoveredContent);
+        return { ...prev, messages };
+      });
+    }
+  };
+
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setIsLoading(true);
     try {
       // Optimistically add user message to UI
@@ -91,6 +120,7 @@ function App() {
 
       // Send message with streaming
       await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+        if (controller.signal.aborted) return;
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -169,15 +199,20 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      }, controller.signal);
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: prev.messages.slice(0, -2),
-      }));
+      if (error.name === 'AbortError') {
+        // User stopped generation — handleStopGeneration already cleaned up messages
+      } else {
+        console.error('Failed to send message:', error);
+        // Remove optimistic messages on error
+        setCurrentConversation((prev) => ({
+          ...prev,
+          messages: prev.messages.slice(0, -2),
+        }));
+      }
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -192,7 +227,10 @@ function App() {
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
+        onStopGeneration={handleStopGeneration}
         isLoading={isLoading}
+        pendingInput={pendingInput}
+        onPendingInputConsumed={() => setPendingInput(null)}
       />
     </div>
   );

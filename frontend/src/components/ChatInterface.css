@@ -161,3 +161,22 @@
   background: #ccc;
   border-color: #ccc;
 }
+
+.stop-button {
+  padding: 14px 28px;
+  background: #e24a4a;
+  border: 1px solid #e24a4a;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+  align-self: flex-end;
+}
+
+.stop-button:hover {
+  background: #c93636;
+  border-color: #c93636;
+}
