@@ -12,8 +12,7 @@ wheels/
 # Keys and secrets
 .env
 
-# Data files
-data/
+# Data files (allow conversation history to be committed)
 
 # Frontend
 frontend/node_modules/
